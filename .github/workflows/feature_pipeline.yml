@@ -1,0 +1,148 @@
+name: Feature Pipeline - Hourly
+
+on:
+  schedule:
+    # Run every hour at minute 0
+    - cron: '0 * * * *'
+  workflow_dispatch:  # Allow manual triggering
+
+jobs:
+  run-feature-pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      issues: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          # No cache - we install minimal packages directly
+      
+      - name: Check disk space before cleanup
+        run: |
+          echo "=== Disk Space Before Cleanup ==="
+          df -h
+      
+      - name: Clean disk space
+        run: |
+          echo "=== Cleaning disk space ==="
+          sudo apt-get clean || true
+          sudo rm -rf /var/lib/apt/lists/* || true
+          sudo rm -rf /tmp/* || true
+          rm -rf $HOME/.cache/pip || true
+          rm -rf $HOME/.cache/* || true
+          echo "Disk space cleaned"
+      
+      - name: Check disk space after cleanup
+        run: |
+          echo "=== Disk Space After Cleanup ==="
+          df -h
+      
+      - name: Verify workflow version
+        run: |
+          echo "=== WORKFLOW VERSION CHECK ==="
+          echo "If you see this message, the updated workflow is running"
+          echo "This workflow does NOT use requirements.txt"
+          if [ -f requirements.txt ]; then
+            echo "WARNING: requirements.txt exists but should NOT be used"
+          fi
+      
+      - name: Install dependencies
+        run: |
+          # ====================================================================
+          # IMPORTANT: This workflow does NOT use requirements.txt
+          # requirements.txt contains heavy packages (TensorFlow, PyTorch, etc.)
+          # that cause "No space left on device" errors in GitHub Actions
+          # ====================================================================
+          
+          # Delete requirements.txt to prevent ANY accidental usage
+          if [ -f requirements.txt ]; then
+            rm requirements.txt
+            echo "DELETED requirements.txt to prevent usage"
+          fi
+          
+          # Also prevent setup.py from installing dependencies
+          if [ -f setup.py ]; then
+            mv setup.py setup.py.backup
+            echo "Temporarily disabled setup.py"
+          fi
+          
+          python -m pip install --upgrade pip
+          # Clean pip cache to save space
+          pip cache purge || true
+          
+          # Set TMPDIR to home directory (more space available)
+          mkdir -p $HOME/tmp
+          export TMPDIR=$HOME/tmp
+          export PIP_TEMP_DIR=$HOME/tmp
+          
+          # Install ONLY essential dependencies for feature pipeline
+          echo "=== Installing core dependencies (NOT from requirements.txt) ==="
+          # Install pandas dependencies first (pytz and python-dateutil are required by pandas)
+          pip install --no-cache-dir pytz python-dateutil
+          pip install --no-cache-dir pandas>=2.0.0 numpy>=1.24.0 python-dotenv>=1.0.0 pyyaml>=6.0 requests>=2.31.0
+          
+          echo "=== Installing database drivers ==="
+          pip install --no-cache-dir pymongo>=4.6.0 motor>=3.3.0
+          
+          # Restore setup.py (but NOT requirements.txt - it stays deleted)
+          if [ -f setup.py.backup ]; then
+            mv setup.py.backup setup.py
+          fi
+          
+          echo "=== Verifying installation ==="
+          pip list | head -20
+          echo "=== Checking for unwanted packages ==="
+          pip list | grep -E "(tensorflow|torch|gradio|streamlit|airflow)" && echo "ERROR: Unwanted packages found!" || echo "✓ No unwanted packages"
+      
+      - name: Check disk space after installation
+        run: |
+          echo "=== Disk Space After Installation ==="
+          df -h
+          echo "=== Checking for large files ==="
+          du -sh $HOME/.cache 2>/dev/null || echo "Cache directory not found"
+      
+      - name: Create data directories
+        run: |
+          mkdir -p data/raw data/features logs
+      
+      - name: Run feature pipeline
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+        run: |
+          python pipelines/feature_pipeline.py
+      
+      - name: Upload feature artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: feature-pipeline-artifacts
+          path: |
+            data/features/*.csv
+            logs/*.log
+          retention-days: 7
+      
+      - name: Notify on failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            try {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `Feature Pipeline Failed - ${new Date().toISOString()}`,
+                body: `The hourly feature pipeline failed. Check the workflow run for details: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+              });
+              console.log('Issue created successfully');
+            } catch (error) {
+              console.log(`Failed to create issue: ${error.message}`);
+              console.log(`Workflow failed. Check run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`);
+            }

@@ -1,0 +1,67 @@
+# AQI Predictor Configuration
+
+# API Configuration
+apis:
+  openmeteo:
+    # API key is optional - only required for commercial use or high-volume requests (>10,000/day)
+    # Set via environment variable OPENMETEO_API_KEY in .env file
+    # Leave empty for non-commercial use (free tier)
+    api_key: ""
+    # Open-Meteo API endpoints
+    air_quality_url: "https://air-quality-api.open-meteo.com/v1/air-quality"
+    weather_url: "https://api.open-meteo.com/v1/forecast"
+    historical_url: "https://archive-api.open-meteo.com/v1/archive"
+
+# MongoDB Configuration
+mongodb:
+  # Connection string is automatically loaded from environment variable MONGODB_URI in .env file
+  # Format: mongodb+srv://username:password@cluster.mongodb.net/database_name?retryWrites=true&w=majority
+  # Note: Password special characters must be URL-encoded (@ = %40, # = %23)
+  connection_string: ""
+  database_name: "aqi_predictor"
+  features_collection: "aqi_features"
+  models_collection: "aqi_models"
+  metadata_collection: "pipeline_metadata"
+
+# Model Configuration
+models:
+  training:
+    test_size: 0.2
+    random_state: 42
+    cv_folds: 5
+  evaluation_metrics:
+    - "rmse"
+    - "mae"
+    - "r2"
+  algorithms:
+    - "random_forest"
+    - "ridge_regression"
+    - "xgboost"
+    - "lightgbm"
+
+# Pipeline Configuration
+pipelines:
+  feature_pipeline:
+    schedule: "hourly"  # Runs every hour
+    lookback_days: 7  # Days of historical data to fetch
+  training_pipeline:
+    schedule: "daily"  # Runs once per day
+    retrain_threshold: 0.1  # Retrain if performance degrades by 10%
+
+# Dashboard Configuration
+dashboard:
+  forecast_days: 3
+  alert_thresholds:
+    good: 50
+    moderate: 100
+    unhealthy_sensitive: 150
+    unhealthy: 200
+    very_unhealthy: 300
+    hazardous: 300
+
+# City Configuration
+city:
+  name: "Karachi"  
+  latitude: 24.8608
+  longitude: 67.0104
+  timezone: "Asia/Karachi"

@@ -1,0 +1,26 @@
+# Constraints file to prevent installation of heavy packages
+# This file is used with pip install --constraint to block specific packages
+
+# Block heavy ML frameworks
+tensorflow==999.0.0
+torch==999.0.0
+
+# Block heavy web frameworks
+gradio==999.0.0
+streamlit==999.0.0
+
+# Block workflow tools
+apache-airflow==999.0.0
+
+# Block heavy interpretation tools
+shap==999.0.0
+lime==999.0.0
+
+# Block visualization (not needed for pipelines)
+matplotlib==999.0.0
+seaborn==999.0.0
+plotly==999.0.0
+
+# Block web server (not needed for training)
+fastapi==999.0.0
+uvicorn==999.0.0
