@@ -31,7 +31,7 @@ def check_dependencies():
 def check_config():
     """Check if configuration files exist."""
     print("\nChecking configuration...")
-    project_root = Path(__file__).parent
+    project_root = Path(__file__).parent.parent
     
     config_file = project_root / "config" / "config.yaml"
     if config_file.exists():
@@ -55,7 +55,7 @@ def check_config():
 def create_directories():
     """Create necessary directories."""
     print("\nCreating directories...")
-    project_root = Path(__file__).parent
+    project_root = Path(__file__).parent.parent
     
     directories = [
         "data/features",

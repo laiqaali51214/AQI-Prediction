@@ -61,7 +61,8 @@ dashboard:
 
 # City Configuration
 city:
-  name: "Karachi"  
-  latitude: 24.8608
-  longitude: 67.0104
+  name: "Rawalpindi"
+  latitude: 33.5651
+  longitude: 73.0169
   timezone: "Asia/Karachi"
+
