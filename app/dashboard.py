@@ -3,14 +3,13 @@ Streamlit dashboard for AQI (Air Quality Index) predictions.
 
 This app connects to the FastAPI backend to:
 - Fetch current AQI and multi-day forecasts (1–7 days)
-- Display model info (best model, RMSE, R²)
+- Display metrics for all models and highlight the best one
 - Show bar charts and tables of predicted AQI by date
 - Trigger alerts when AQI exceeds unhealthy thresholds
 """
 import streamlit as st
 import pandas as pd
 import numpy as np
-import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import requests
@@ -20,186 +19,143 @@ from pathlib import Path
 import sys
 import logging
 
-# Add project root so we can import config and pipelines
+# Add project root to path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
-
 from config.settings import config
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- Page configuration (must be first Streamlit call) ---
+# --- Page configuration ---
 st.set_page_config(
     page_title="AQI Predictor Dashboard",
-    page_icon="",
+    page_icon="🌫️",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# --- API base URL: Streamlit Cloud uses st.secrets, local uses .env ---
+# --- API base URL ---
 try:
     API_URL = st.secrets.get("FASTAPI_URL", "http://localhost:8000")
 except (AttributeError, FileNotFoundError, KeyError):
     API_URL = os.getenv("FASTAPI_URL", "http://localhost:8000")
 
-# --- Custom CSS for header, metric cards, and alert boxes ---
+# --- Custom CSS ---
 st.markdown("""
-    <style>
-    .main-header {
-        font-size: 3rem;
-        font-weight: bold;
-        color: #1f77b4;
-        text-align: center;
-        margin-bottom: 2rem;
-    }
-    .metric-card {
-        background-color: #f0f2f6;
-        padding: 1rem;
-        border-radius: 0.5rem;
-        margin: 0.5rem 0;
-    }
-    .alert-box {
-        padding: 1rem;
-        border-radius: 0.5rem;
-        margin: 1rem 0;
-    }
-    </style>
+<style>
+.main-header {
+    font-size: 3rem;
+    font-weight: bold;
+    color: #00BFA6;
+    text-align: center;
+    margin-bottom: 2rem;
+}
+.metric-card {
+    background-color: #1E2228;
+    padding: 20px;
+    border-radius: 15px;
+    text-align: center;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    color: #FAFAFA;
+    margin-bottom: 1rem;
+}
+.alert-box {
+    padding: 15px;
+    border-radius: 10px;
+    margin: 10px 0;
+    font-weight: bold;
+}
+.category-good { color: #00E676; }
+.category-moderate { color: #FFD600; }
+.category-unhealthy { color: #FF5252; }
+.category-very-unhealthy { color: #9C27B0; }
+.category-hazardous { color: #800000; }
+</style>
 """, unsafe_allow_html=True)
 
-
-# ============== API client helpers (cached to avoid repeated calls) ==============
+# ============== Helper Functions ==============
 
 @st.cache_data(ttl=300)
-def get_predictions(forecast_days: int = 3, latitude: float = None, longitude: float = None, max_retries: int = 2):
-    """
-    Call FastAPI /predict endpoint and return JSON.
-    Uses exponential backoff on timeout/502 (e.g. Railway cold start).
-    Results cached for 5 minutes (ttl=300).
-    """
+def get_predictions(forecast_days=3, latitude=None, longitude=None, max_retries=2):
     url = f"{API_URL}/predict"
     payload = {"forecast_days": forecast_days}
     if latitude and longitude:
         payload["latitude"] = latitude
         payload["longitude"] = longitude
 
-    # Retry with exponential backoff (1s, 2s) on timeout or 502
     for attempt in range(max_retries + 1):
         try:
-            # Increase timeout for predictions (model loading can take time)
-            timeout = 60 if attempt == 0 else 90  # Longer timeout on retry
+            timeout = 60 if attempt == 0 else 90
             response = requests.post(url, json=payload, timeout=timeout)
             response.raise_for_status()
             return response.json()
-        except requests.exceptions.Timeout as e:
-            if attempt < max_retries:
-                logger.warning(f"Request timeout (attempt {attempt + 1}/{max_retries + 1}), retrying...")
-                time.sleep(2 ** attempt)  # Exponential backoff: 1s, 2s, 4s
-                continue
-            else:
-                logger.error(f"Error calling prediction API: Request timed out after {max_retries + 1} attempts")
-                return None
         except requests.exceptions.RequestException as e:
-            # Handle 502 Bad Gateway (Railway cold start or service down)
-            is_502 = hasattr(e, 'response') and e.response is not None and e.response.status_code == 502
-            is_timeout = "timeout" in str(e).lower() or isinstance(e, requests.exceptions.Timeout)
-            
-            if attempt < max_retries and (is_timeout or is_502):
+            if attempt < max_retries:
                 wait_time = 2 ** attempt
-                logger.warning(f"Request error (attempt {attempt + 1}/{max_retries + 1}): {str(e)}")
-                if is_502:
-                    logger.info(f"502 Bad Gateway - API may be starting up. Waiting {wait_time}s before retry...")
+                logger.warning(f"Retry {attempt+1}: {str(e)}")
                 time.sleep(wait_time)
                 continue
             else:
-                logger.error(f"Error calling prediction API: {str(e)}")
+                logger.error(f"Failed after {max_retries+1} attempts: {str(e)}")
                 return None
     return None
 
-
 @st.cache_data(ttl=300)
-def get_available_models(max_retries: int = 2):
-    """
-    Call FastAPI /models endpoint; returns list of trained models and metrics.
-    Cached 5 minutes. Retries on timeout/502 for cold starts.
-    """
+def get_available_models(max_retries=2):
     url = f"{API_URL}/models"
-    
-    # Retry logic for cold starts
     for attempt in range(max_retries + 1):
         try:
-            # Increase timeout for model listing (can take time on cold start)
-            timeout = 30 if attempt == 0 else 45  # Longer timeout on retry
+            timeout = 30 if attempt == 0 else 45
             response = requests.get(url, timeout=timeout)
             response.raise_for_status()
             return response.json()
-        except requests.exceptions.Timeout as e:
-            if attempt < max_retries:
-                logger.warning(f"Request timeout (attempt {attempt + 1}/{max_retries + 1}), retrying...")
-                time.sleep(2 ** attempt)  # Exponential backoff
-                continue
-            else:
-                logger.error(f"Error getting models: Request timed out after {max_retries + 1} attempts")
-                return None
         except requests.exceptions.RequestException as e:
-            # Handle 502 Bad Gateway (Railway cold start or service down)
-            is_502 = hasattr(e, 'response') and e.response is not None and e.response.status_code == 502
-            is_timeout = "timeout" in str(e).lower() or isinstance(e, requests.exceptions.Timeout)
-            
-            if attempt < max_retries and (is_timeout or is_502):
+            if attempt < max_retries:
                 wait_time = 2 ** attempt
-                logger.warning(f"Request error (attempt {attempt + 1}/{max_retries + 1}): {str(e)}")
-                if is_502:
-                    logger.info(f"502 Bad Gateway - API may be starting up. Waiting {wait_time}s before retry...")
+                logger.warning(f"Retry {attempt+1}: {str(e)}")
                 time.sleep(wait_time)
                 continue
             else:
-                logger.error(f"Error getting models: {str(e)}")
+                logger.error(f"Failed after {max_retries+1} attempts: {str(e)}")
                 return None
     return None
 
-
-def get_aqi_category(aqi: float) -> tuple:
-    """
-    Map AQI value to EPA category name, color (for charts), and extra label.
-    Returns: (category_name, color, extra).
-    """
+def get_aqi_category(aqi: float):
     if aqi <= 50:
-        return "Good", "green", ""
+        return "Good", "green"
     elif aqi <= 100:
-        return "Moderate", "yellow", ""
+        return "Moderate", "yellow"
     elif aqi <= 150:
-        return "Unhealthy for Sensitive Groups", "orange", ""
+        return "Unhealthy for Sensitive Groups", "orange"
     elif aqi <= 200:
-        return "Unhealthy", "red", ""
+        return "Unhealthy", "red"
     elif aqi <= 300:
-        return "Very Unhealthy", "purple", ""
+        return "Very Unhealthy", "purple"
     else:
-        return "Hazardous", "maroon", ""
+        return "Hazardous", "maroon"
 
+def format_metric(value, decimals=2):
+    """Safely format numeric metrics, else return 'N/A'."""
+    return f"{value:.{decimals}f}" if isinstance(value, (int, float)) else "N/A"
 
-# ============== Main dashboard UI ==============
+# ============== Dashboard UI ==============
 
 def main():
-    """Render the full dashboard: sidebar config, API checks, model info, predictions, charts."""
     st.markdown('<h1 class="main-header">AQI Predictor Dashboard</h1>', unsafe_allow_html=True)
 
-    # --- Sidebar: city from config, forecast days slider, about, API status ---
+    # --- Sidebar ---
     with st.sidebar:
         st.header("Configuration")
         st.text(f"City: {config['city']['name']}")
         st.text(f"Location: {config['city']['latitude']:.4f}, {config['city']['longitude']:.4f}")
-        
         forecast_days = st.slider("Forecast Days", 1, 7, 3)
         latitude = config['city']['latitude']
         longitude = config['city']['longitude']
 
         st.header("About")
-        st.info("""
-        This dashboard provides real-time AQI predictions 
-        for the next 3 days using machine learning models.
-        """)
-        
+        st.info("Real-time AQI predictions using machine learning models.")
+
         st.header("API Status")
         try:
             health_response = requests.get(f"{API_URL}/health", timeout=15)
@@ -207,107 +163,88 @@ def main():
                 st.success("API Connected")
             else:
                 st.error("API Unavailable")
-        except requests.exceptions.Timeout:
-            st.warning("API Slow to Respond (may be cold start)")
-        except Exception:
+        except:
             st.error("API Unavailable")
 
-    # --- Block main content if API is unreachable (avoid confusing errors below) ---
-    try:
-        health = requests.get(f"{API_URL}/health", timeout=15)
-        if health.status_code != 200:
-            st.error("Prediction API is not available. Please ensure the FastAPI service is running.")
-            st.info("If this is a Railway deployment, the API may be starting up (cold start). Try again in a moment.")
-            return
-    except requests.exceptions.Timeout:
-        st.warning("⚠️ API is slow to respond. This may be a cold start (first request after inactivity).")
-        st.info("💡 **Tip**: Railway apps can take 30-60 seconds to start. Please wait and try again.")
-        st.info("The API will respond faster on subsequent requests.")
-        return
-    except Exception as e:
-        st.error(f"Cannot connect to Prediction API: {str(e)}")
-        st.info("If this is a Railway deployment, check that the API URL is correct and the service is running.")
-        return
-
-    # --- Sidebar: fetch and show best model (lowest RMSE) and its metrics ---
+    # --- Fetch all models ---
     models_info = get_available_models()
+    best_model = None
+
     if models_info and isinstance(models_info, dict) and models_info.get('models'):
-        st.header("Model Information")
-        
-        best_model = None
-        best_rmse = float('inf')
+        st.header("All Trained Models Metrics")
+
+        # Build metrics table
+        metrics_data = []
         for model in models_info['models']:
-            if isinstance(model, dict):
-                rmse = model.get('metrics', {}).get('rmse', float('inf'))
-                if isinstance(rmse, (int, float)) and rmse > 0 and rmse < best_rmse:
-                    best_rmse = rmse
-                    best_model = model
+            m_metrics = model.get('metrics', {})
+            metrics_data.append({
+                "Model": model.get('name', 'Unknown'),
+                "RMSE": format_metric(m_metrics.get('rmse')),
+                "MAE": format_metric(m_metrics.get('mae')),
+                "R²": format_metric(m_metrics.get('r2'), 3),
+                "MAPE (%)": format_metric(m_metrics.get('mape')),
+                # "Explained Variance": format_metric(m_metrics.get('explained_variance'))
+            })
 
-        # Show best model name and RMSE in sidebar
-        if best_model:
-            st.success(f"**Best Model**: {best_model.get('name', 'Unknown')} (RMSE: {best_model.get('metrics', {}).get('rmse', 'N/A'):.2f})")
-        
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            if best_model:
-                st.metric("Best Model", best_model.get('name', 'Unknown'))
-            else:
-                st.metric("Best Model", "N/A")
-        with col2:
-            if best_model and best_model.get('metrics'):
-                r2 = best_model['metrics'].get('r2', 0)
-                st.metric("R² Score", f"{r2:.3f}" if isinstance(r2, (int, float)) else "N/A")
-            else:
-                st.metric("R² Score", "N/A")
-        with col3:
-            if best_model and best_model.get('metrics'):
-                rmse = best_model['metrics'].get('rmse', 0)
-                st.metric("RMSE", f"{rmse:.2f}" if isinstance(rmse, (int, float)) else "N/A")
-            else:
-                st.metric("RMSE", "N/A")
-    elif models_info:
-        st.header("Model Information")
-        st.warning("Model information is not available in the expected format.")
+        metrics_df = pd.DataFrame(metrics_data)
+        st.dataframe(metrics_df, use_container_width=True)
 
-    # --- Main area: button to fetch predictions, then show current AQI + forecast ---
+        # Identify best model (lowest RMSE)
+        # Identify best model (lowest RMSE)
+        rmse_values = []
+        valid_models = []
+
+        for m in models_info['models']:
+            rmse = m.get('metrics', {}).get('rmse')
+            if isinstance(rmse, (int, float)):
+                rmse_values.append(rmse)
+                valid_models.append(m)
+
+        if rmse_values:
+            best_idx = np.argmin(rmse_values)
+            best_model = valid_models[best_idx]
+            st.success(f"Best Model: {best_model.get('name')} (RMSE: {format_metric(best_model.get('metrics', {}).get('rmse'))})")
+
+
+    # --- Main predictions section ---
     st.header("Current Air Quality and Forecast")
-    st.info("Click the button below to fetch real-time AQI data and generate predictions for the configured city.")
-    
+    st.info("Click the button to fetch real-time AQI predictions.")
+
     if st.button("Get Predictions", type="primary"):
         with st.spinner("Fetching predictions..."):
             predictions_data = get_predictions(forecast_days=forecast_days, latitude=latitude, longitude=longitude)
-            
             if predictions_data is None:
-                st.error("Could not fetch predictions. Please check API connection.")
+                st.error("Could not fetch predictions. Check API connection.")
                 return
 
-            # Show which model was used and its RMSE/R²
-            if predictions_data.get('model_name'):
-                model_name = predictions_data.get('model_name', 'Unknown')
-                model_metrics = predictions_data.get('model_metrics', {})
-                rmse = model_metrics.get('rmse', 'N/A')
-                r2 = model_metrics.get('r2', 'N/A')
-                
-                # Format metrics properly
-                rmse_str = f"{rmse:.2f}" if isinstance(rmse, (int, float)) else str(rmse)
-                r2_str = f"{r2:.3f}" if isinstance(r2, (int, float)) else str(r2)
-                st.success(f"**Model Used for Prediction**: {model_name} | **RMSE**: {rmse_str} | **R²**: {r2_str}")
+            # Display model metrics safely
+            model_name = predictions_data.get('model_name', 'Unknown')
+            metrics = predictions_data.get('model_metrics', {})
+            rmse = format_metric(metrics.get('rmse'))
+            mae = format_metric(metrics.get('mae'))
+            r2 = format_metric(metrics.get('r2'), 3)
+            mape = format_metric(metrics.get('mape'))
+            # ev = format_metric(metrics.get('explained_variance'))
 
-            # Current AQI metric and category (with alert if above unhealthy threshold)
+            # Show metrics in cards
+            col1, col2, col3, col4, col5 = st.columns(5)
+            col1.metric("RMSE", rmse)
+            col2.metric("MAE", mae)
+            col3.metric("R²", r2)
+            col4.metric("MAPE (%)", mape)
+            # col5.metric("Explained Var", ev)
+            st.markdown(f"**Model Used:** {model_name}")
+
+            # Current AQI
             if predictions_data.get('current_aqi'):
                 current_aqi = predictions_data['current_aqi']
-                category, color, _ = get_aqi_category(current_aqi)
-                
+                category, _ = get_aqi_category(current_aqi)
                 col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("Current AQI", f"{current_aqi:.0f}")
-                with col2:
-                    st.markdown(f"### {category}")
-                with col3:
-                    if current_aqi > config['dashboard']['alert_thresholds']['unhealthy']:
-                        st.error("Alert: Unhealthy air quality detected!")
+                col1.metric("Current AQI", f"{current_aqi:.0f}")
+                col2.markdown(f"### {category}")
+                col3.markdown(f"<div class='alert-box'>{'⚠️ Unhealthy air quality!' if current_aqi > config['dashboard']['alert_thresholds']['unhealthy'] else ''}</div>", unsafe_allow_html=True)
 
-            # Forecast: build Plotly bar chart (one bar per day, color by AQI category)
+            # Forecast chart
             predictions = predictions_data.get('predictions', [])
             if predictions:
                 pred_df = pd.DataFrame(predictions)
@@ -315,54 +252,45 @@ def main():
                 for _, row in pred_df.iterrows():
                     aqi = row.get('predicted_aqi')
                     if aqi is not None:
-                        category, color, _ = get_aqi_category(aqi)
-                        
+                        _, color = get_aqi_category(aqi)
                         fig.add_trace(go.Bar(
                             x=[row['date']],
                             y=[aqi],
-                            name=f"Day {row['day']}",
                             marker_color=color,
                             text=f"{aqi:.0f}",
                             textposition='outside',
-                            hovertemplate=f"<b>{row['date']}</b><br>AQI: {aqi:.0f}<br>Category: {category}<extra></extra>"
+                            hovertemplate=f"<b>{row['date']}</b><br>AQI: {aqi:.0f}<extra></extra>"
                         ))
-                # Y-axis: at least 0–100, or up to 500 (EPA scale), or 20% above max
-                max_aqi = max(pred_df['predicted_aqi'].max() if not pred_df.empty else 100, 100)
+                max_aqi = max(pred_df['predicted_aqi'].max(), 100)
                 yaxis_max = max(500, max_aqi * 1.2)
                 fig.update_layout(
-                    title=f"AQI Forecast for Next {forecast_days} Days",
+                    title=f"AQI Forecast Next {forecast_days} Days",
                     xaxis_title="Date",
                     yaxis_title="AQI",
-                    yaxis=dict(range=[0, yaxis_max], dtick=50),  # Fixed range with 50-unit ticks
-                    height=400,
-                    showlegend=False
+                    yaxis=dict(range=[0, yaxis_max], dtick=50),
+                    showlegend=False,
+                    height=400
                 )
-                
                 st.plotly_chart(fig, use_container_width=True)
 
-                # Table: date, predicted AQI, category
-                st.subheader("Forecast Details")
-                display_df = pred_df.copy()
-                display_df['Predicted AQI'] = display_df['predicted_aqi'].apply(lambda x: f"{x:.0f}" if x else "N/A")
-                display_df = display_df[['date', 'Predicted AQI', 'category']]
+                # Forecast table
+                pred_df['Predicted AQI'] = pred_df['predicted_aqi'].apply(lambda x: f"{x:.0f}" if x else "N/A")
+                display_df = pred_df[['date', 'Predicted AQI', 'category']]
                 display_df.columns = ['Date', 'Predicted AQI', 'Category']
                 st.dataframe(display_df, use_container_width=True)
 
-                # Warnings for days where predicted AQI exceeds unhealthy threshold
+                # Alerts
                 st.subheader("Alerts")
-                alerts = []
-                for _, row in pred_df.iterrows():
-                    aqi = row.get('predicted_aqi')
-                    if aqi and aqi > config['dashboard']['alert_thresholds']['unhealthy']:
-                        alerts.append(f"{row['date']}: Unhealthy AQI predicted ({aqi:.0f})")
-                
+                alerts = [f"{row['date']}: Unhealthy AQI ({row['predicted_aqi']:.0f})" 
+                          for _, row in pred_df.iterrows() 
+                          if row.get('predicted_aqi') and row['predicted_aqi'] > config['dashboard']['alert_thresholds']['unhealthy']]
                 if alerts:
                     for alert in alerts:
                         st.warning(alert)
                 else:
-                    st.success("No alerts - air quality is expected to be within acceptable limits.")
+                    st.success("No alerts - air quality within acceptable limits.")
 
-    # Collapsible EPA AQI category reference
+    # Collapsible reference
     with st.expander("About AQI Categories"):
         st.markdown("""
         - **Good (0-50)**: Air quality is satisfactory.
@@ -373,7 +301,5 @@ def main():
         - **Hazardous (301+)**: Health warning - entire population likely affected.
         """)
 
-
 if __name__ == "__main__":
     main()
-

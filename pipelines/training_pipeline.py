@@ -9,6 +9,16 @@ import sys
 import pickle
 import json
 
+#############################################################################################################
+################################# ERROR HANDLING ############################################################
+#############################################################################################################
+from sklearn.pipeline import Pipeline
+from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import StandardScaler
+from sklearn.feature_selection import SelectKBest, f_regression
+from sklearn.linear_model import Ridge
+#############################################################################################################
+
 # Add project root to path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
@@ -113,140 +123,231 @@ class ModelTrainer:
         logger.info(f"Loaded {len(features)} rows from local files")
         return features
     
+    # def prepare_data(self, features: pd.DataFrame) -> tuple:
+    #     """
+    #     Prepare data for training.
+        
+    #     Args:
+    #         features: DataFrame with features
+        
+    #     Returns:
+    #         Tuple of (X_train, X_test, y_train, y_test, feature_names)
+    #     """
+    #     # Select target (for now, predict next day AQI)
+    #     # In real scenario, we'd have target columns from historical data
+    #     if 'aqi' in features.columns:
+    #         # Create target: AQI 24 hours ahead (next day)
+    #         features = features.copy()
+    #         features['target_aqi'] = features['aqi'].shift(-24)
+    #         features = features.dropna(subset=['target_aqi'])
+        
+    #     # Select feature columns (exclude metadata and targets)
+    #     exclude_cols = [
+    #         'timestamp', 'city', 'pipeline_run_date', 'source',
+    #         'aqi', 'target_aqi', 'aqi_category',
+    #         'aqi_target_day_1', 'aqi_target_day_2', 'aqi_target_day_3',
+    #         'inserted_at', '_id',  # MongoDB metadata
+    #         # Exclude lag_24h features to prevent data leakage (target is AQI shifted 24h forward)
+    #         'aqi_lag_24h', 'aqi_lag_24'
+    #     ]
+        
+    #     feature_cols = [col for col in features.columns if col not in exclude_cols]
+        
+    #     # Remove datetime/timestamp columns (keep only numeric columns)
+    #     feature_cols = [col for col in feature_cols 
+    #                    if not pd.api.types.is_datetime64_any_dtype(features[col])]
+        
+    #     # Exclude any remaining lag_24h features (data leakage prevention)
+    #     feature_cols = [col for col in feature_cols if 'lag_24' not in col.lower()]
+        
+    #     # Remove columns with too many missing values
+    #     missing_threshold = 0.5
+    #     feature_cols = [col for col in feature_cols 
+    #                    if features[col].notna().sum() / len(features) > missing_threshold]
+        
+    #     # Ensure all columns are numeric
+    #     X = features[feature_cols].copy()
+    #     for col in X.columns:
+    #         if not pd.api.types.is_numeric_dtype(X[col]):
+    #             try:
+    #                 X[col] = pd.to_numeric(X[col], errors='coerce')
+    #             except:
+    #                 X = X.drop(columns=[col])
+    #                 feature_cols.remove(col)
+        
+    #     # Better imputation: use median for numeric columns
+    #     # Handle columns that are completely missing or non-numeric
+    #     from sklearn.impute import SimpleImputer
+        
+    #     # Drop columns with all missing values before imputation (SimpleImputer skips these)
+    #     cols_with_data = X.columns[X.notna().any()].tolist()
+    #     cols_all_missing = [col for col in X.columns if col not in cols_with_data]
+        
+    #     if cols_all_missing:
+    #         logger.warning(f"Dropping columns with all missing values: {cols_all_missing}")
+    #         X = X[cols_with_data]  # Keep only columns with data
+    #         feature_cols = [col for col in feature_cols if col in cols_with_data]
+        
+    #     # Only impute if we have columns with data
+    #     if len(X.columns) > 0:
+    #         imputer = SimpleImputer(strategy='median')
+    #         X_imputed = imputer.fit_transform(X)
+    #         # Get the actual columns that were imputed (in case imputer dropped any)
+    #         imputed_cols = X.columns.tolist()
+    #         X = pd.DataFrame(X_imputed, columns=imputed_cols, index=X.index)
+    #     else:
+    #         raise ValueError("No valid features remaining after removing missing columns")
+        
+    #     # Feature scaling for better model performance
+    #     from sklearn.preprocessing import StandardScaler
+    #     scaler = StandardScaler()
+    #     X_scaled = scaler.fit_transform(X)
+    #     X = pd.DataFrame(X_scaled, columns=X.columns, index=X.index)
+    #     self.scaler = scaler  # Save for later use in prediction
+        
+    #     y = features['target_aqi']
+        
+    #     # Feature selection to remove noise and improve performance
+    #     # Use SelectKBest to select top features based on F-statistic
+    #     if len(feature_cols) > 20:  # Only apply if we have many features
+    #         logger.info(f"Applying feature selection (current features: {len(feature_cols)})...")
+    #         try:
+    #             # Select top 80% of features based on correlation with target
+    #             k = max(20, int(len(feature_cols) * 0.8))
+    #             selector = SelectKBest(score_func=f_regression, k=k)
+    #             X_selected = selector.fit_transform(X, y)
+    #             selected_features = X.columns[selector.get_support()].tolist()
+    #             X = pd.DataFrame(X_selected, columns=selected_features, index=X.index)
+    #             feature_cols = selected_features
+    #             self.feature_selector = selector  # Save selector for prediction
+    #             original_count = len(X.columns) if hasattr(X, 'columns') else len(feature_cols)
+    #             logger.info(f"Selected {len(feature_cols)} features out of {original_count} original features")
+    #         except Exception as e:
+    #             logger.warning(f"Feature selection failed: {str(e)}. Using all features.")
+        
+    #     # Validate target variable
+    #     if y.nunique() <= 1:
+    #         raise ValueError(f"Target variable has only {y.nunique()} unique value(s). Cannot train model. "
+    #                        f"Check data quality - AQI values may be constant.")
+        
+    #     if y.std() < 0.01:
+    #         logger.warning(f"Target variable has very low variance (std={y.std():.4f}). "
+    #                      f"Model may overfit or predict constant values.")
+        
+    #     # Split data - use temporal split for time series data
+    #     # Sort by timestamp if available to ensure temporal order
+    #     if 'timestamp' in features.columns:
+    #         features_sorted = features.sort_values('timestamp')
+    #         split_idx = int(len(features_sorted) * (1 - self.test_size))
+    #         train_indices = features_sorted.index[:split_idx]
+    #         test_indices = features_sorted.index[split_idx:]
+    #         X_train = X.loc[train_indices]
+    #         X_test = X.loc[test_indices]
+    #         y_train = y.loc[train_indices]
+    #         y_test = y.loc[test_indices]
+    #     else:
+    #         # Fallback to random split if no timestamp
+    #         X_train, X_test, y_train, y_test = train_test_split(
+    #             X, y, test_size=self.test_size, random_state=self.random_state
+    #         )
+        
+    #     logger.info(f"Training set: {len(X_train)} samples, {len(feature_cols)} features")
+    #     logger.info(f"Test set: {len(X_test)} samples")
+    #     logger.info(f"Target statistics - Mean: {y_train.mean():.2f}, Std: {y_train.std():.2f}, "
+    #                f"Unique values: {y_train.nunique()}")
+        
+    #     return X_train, X_test, y_train, y_test, feature_cols
+
+    ##############################################################################################################
+    ##############################################################################################################
+
     def prepare_data(self, features: pd.DataFrame) -> tuple:
         """
-        Prepare data for training.
-        
-        Args:
-            features: DataFrame with features
-        
-        Returns:
-            Tuple of (X_train, X_test, y_train, y_test, feature_names)
+        Prepare raw data for training.
+        No scaling, no imputation, no feature selection.
+        All preprocessing is handled inside sklearn Pipeline.
         """
-        # Select target (for now, predict next day AQI)
-        # In real scenario, we'd have target columns from historical data
-        if 'aqi' in features.columns:
-            # Create target: AQI 24 hours ahead (next day)
-            features = features.copy()
-            features['target_aqi'] = features['aqi'].shift(-24)
-            features = features.dropna(subset=['target_aqi'])
-        
-        # Select feature columns (exclude metadata and targets)
+
+        features = features.copy()
+
+        # --------------------------------------------------
+        # 1️⃣ Create target (next-day AQI)
+        # --------------------------------------------------
+        if 'aqi' not in features.columns:
+            raise ValueError("AQI column not found in features")
+
+        features['target_aqi'] = features['aqi'].shift(-24)
+        features = features.dropna(subset=['target_aqi'])
+
+        # --------------------------------------------------
+        # 2️⃣ Drop non-feature columns
+        # --------------------------------------------------
         exclude_cols = [
             'timestamp', 'city', 'pipeline_run_date', 'source',
             'aqi', 'target_aqi', 'aqi_category',
             'aqi_target_day_1', 'aqi_target_day_2', 'aqi_target_day_3',
-            'inserted_at', '_id',  # MongoDB metadata
-            # Exclude lag_24h features to prevent data leakage (target is AQI shifted 24h forward)
-            'aqi_lag_24h', 'aqi_lag_24'
+            'inserted_at', '_id'
         ]
-        
+
         feature_cols = [col for col in features.columns if col not in exclude_cols]
-        
-        # Remove datetime/timestamp columns (keep only numeric columns)
-        feature_cols = [col for col in feature_cols 
-                       if not pd.api.types.is_datetime64_any_dtype(features[col])]
-        
-        # Exclude any remaining lag_24h features (data leakage prevention)
-        feature_cols = [col for col in feature_cols if 'lag_24' not in col.lower()]
-        
-        # Remove columns with too many missing values
-        missing_threshold = 0.5
-        feature_cols = [col for col in feature_cols 
-                       if features[col].notna().sum() / len(features) > missing_threshold]
-        
-        # Ensure all columns are numeric
+
+        # --------------------------------------------------
+        # 3️⃣ Keep ONLY numeric columns
+        # --------------------------------------------------
         X = features[feature_cols].copy()
+
         for col in X.columns:
-            if not pd.api.types.is_numeric_dtype(X[col]):
-                try:
-                    X[col] = pd.to_numeric(X[col], errors='coerce')
-                except:
-                    X = X.drop(columns=[col])
-                    feature_cols.remove(col)
-        
-        # Better imputation: use median for numeric columns
-        # Handle columns that are completely missing or non-numeric
-        from sklearn.impute import SimpleImputer
-        
-        # Drop columns with all missing values before imputation (SimpleImputer skips these)
-        cols_with_data = X.columns[X.notna().any()].tolist()
-        cols_all_missing = [col for col in X.columns if col not in cols_with_data]
-        
-        if cols_all_missing:
-            logger.warning(f"Dropping columns with all missing values: {cols_all_missing}")
-            X = X[cols_with_data]  # Keep only columns with data
-            feature_cols = [col for col in feature_cols if col in cols_with_data]
-        
-        # Only impute if we have columns with data
-        if len(X.columns) > 0:
-            imputer = SimpleImputer(strategy='median')
-            X_imputed = imputer.fit_transform(X)
-            # Get the actual columns that were imputed (in case imputer dropped any)
-            imputed_cols = X.columns.tolist()
-            X = pd.DataFrame(X_imputed, columns=imputed_cols, index=X.index)
-        else:
-            raise ValueError("No valid features remaining after removing missing columns")
-        
-        # Feature scaling for better model performance
-        from sklearn.preprocessing import StandardScaler
-        scaler = StandardScaler()
-        X_scaled = scaler.fit_transform(X)
-        X = pd.DataFrame(X_scaled, columns=X.columns, index=X.index)
-        self.scaler = scaler  # Save for later use in prediction
-        
+            X[col] = pd.to_numeric(X[col], errors="coerce")
+
+        # Do NOT fill NaN here
+        # Do NOT scale here
+        # Do NOT select features here
+
+        # Drop columns that are completely empty
+        X = X.dropna(axis=1, how='all')
+
+        if X.shape[1] == 0:
+            raise ValueError("No valid numeric features found after cleaning.")
+
         y = features['target_aqi']
-        
-        # Feature selection to remove noise and improve performance
-        # Use SelectKBest to select top features based on F-statistic
-        if len(feature_cols) > 20:  # Only apply if we have many features
-            logger.info(f"Applying feature selection (current features: {len(feature_cols)})...")
-            try:
-                # Select top 80% of features based on correlation with target
-                k = max(20, int(len(feature_cols) * 0.8))
-                selector = SelectKBest(score_func=f_regression, k=k)
-                X_selected = selector.fit_transform(X, y)
-                selected_features = X.columns[selector.get_support()].tolist()
-                X = pd.DataFrame(X_selected, columns=selected_features, index=X.index)
-                feature_cols = selected_features
-                self.feature_selector = selector  # Save selector for prediction
-                original_count = len(X.columns) if hasattr(X, 'columns') else len(feature_cols)
-                logger.info(f"Selected {len(feature_cols)} features out of {original_count} original features")
-            except Exception as e:
-                logger.warning(f"Feature selection failed: {str(e)}. Using all features.")
-        
-        # Validate target variable
+
+        # --------------------------------------------------
+        # 4️⃣ Basic sanity check
+        # --------------------------------------------------
         if y.nunique() <= 1:
-            raise ValueError(f"Target variable has only {y.nunique()} unique value(s). Cannot train model. "
-                           f"Check data quality - AQI values may be constant.")
-        
-        if y.std() < 0.01:
-            logger.warning(f"Target variable has very low variance (std={y.std():.4f}). "
-                         f"Model may overfit or predict constant values.")
-        
-        # Split data - use temporal split for time series data
-        # Sort by timestamp if available to ensure temporal order
+            raise ValueError("Target variable has no variance.")
+
+        # --------------------------------------------------
+        # 5️⃣ Time-based split
+        # --------------------------------------------------
         if 'timestamp' in features.columns:
             features_sorted = features.sort_values('timestamp')
             split_idx = int(len(features_sorted) * (1 - self.test_size))
+
             train_indices = features_sorted.index[:split_idx]
             test_indices = features_sorted.index[split_idx:]
+
             X_train = X.loc[train_indices]
             X_test = X.loc[test_indices]
             y_train = y.loc[train_indices]
             y_test = y.loc[test_indices]
         else:
-            # Fallback to random split if no timestamp
             X_train, X_test, y_train, y_test = train_test_split(
-                X, y, test_size=self.test_size, random_state=self.random_state
+                X, y,
+                test_size=self.test_size,
+                random_state=self.random_state
             )
-        
-        logger.info(f"Training set: {len(X_train)} samples, {len(feature_cols)} features")
-        logger.info(f"Test set: {len(X_test)} samples")
-        logger.info(f"Target statistics - Mean: {y_train.mean():.2f}, Std: {y_train.std():.2f}, "
-                   f"Unique values: {y_train.nunique()}")
-        
-        return X_train, X_test, y_train, y_test, feature_cols
+
+        logger.info(f"Training samples: {len(X_train)}")
+        logger.info(f"Test samples: {len(X_test)}")
+        logger.info(f"Number of features: {X.shape[1]}")
+        logger.info(f"Target mean: {y_train.mean():.2f}, std: {y_train.std():.2f}")
+
+        return X_train, X_test, y_train, y_test, X.columns.tolist()
+
+    ##############################################################################################################
+    ##############################################################################################################  
+
     
     def train_random_forest(self, X_train, y_train) -> RandomForestRegressor:
         """Train Random Forest model with improved hyperparameters to reduce overfitting."""
@@ -265,21 +366,43 @@ class ModelTrainer:
         model.fit(X_train, y_train)
         return model
     
+    # def train_ridge(self, X_train, y_train) -> Ridge:
+    #     """Train Ridge Regression model with cross-validation for optimal alpha."""
+    #     logger.info("Training Ridge Regression model...")
+    #     from sklearn.model_selection import GridSearchCV
+    #     param_grid = {'alpha': [0.1, 0.5, 1.0, 5.0, 10.0, 50.0, 100.0]}
+    #     model = GridSearchCV(
+    #         Ridge(random_state=self.random_state),
+    #         param_grid,
+    #         cv=5,
+    #         scoring='neg_mean_squared_error',
+    #         n_jobs=-1
+    #     )
+    #     model.fit(X_train, y_train)
+    #     logger.info(f"Best Ridge alpha: {model.best_params_['alpha']}")
+    #     return model.best_estimator_
+
+
+#############################################################################################################
+################################# ERROR HANDLING ############################################################
+#############################################################################################################
     def train_ridge(self, X_train, y_train) -> Ridge:
-        """Train Ridge Regression model with cross-validation for optimal alpha."""
-        logger.info("Training Ridge Regression model...")
-        from sklearn.model_selection import GridSearchCV
-        param_grid = {'alpha': [0.1, 0.5, 1.0, 5.0, 10.0, 50.0, 100.0]}
-        model = GridSearchCV(
-            Ridge(random_state=self.random_state),
-            param_grid,
-            cv=5,
-            scoring='neg_mean_squared_error',
-            n_jobs=-1
-        )
-        model.fit(X_train, y_train)
-        logger.info(f"Best Ridge alpha: {model.best_params_['alpha']}")
-        return model.best_estimator_
+        """
+        Train Ridge Regression using full preprocessing pipeline
+        """
+        pipeline = Pipeline([
+            ("imputer", SimpleImputer(strategy="median")),
+            ("scaler", StandardScaler()),
+            ("selector", SelectKBest(score_func=f_regression, 
+                                    k=min(40, X_train.shape[1]))),
+            ("model", Ridge(alpha=1.0, random_state=self.random_state))
+        ])
+
+        pipeline.fit(X_train, y_train)
+
+        return pipeline
+
+#############################################################################################################
     
     def train_xgboost(self, X_train, y_train) -> xgb.XGBRegressor:
         """Train XGBoost model with improved hyperparameters and early stopping."""
@@ -654,15 +777,17 @@ def main():
     # Train models
     results = trainer.train_all_models(X_train, X_test, y_train, y_test)
     
-    # Select best model
-    best_model_name = trainer.select_best_model(results)
-    best_model = trainer.models[best_model_name]
-    best_metrics = results[best_model_name]
+    # Save all trained models
+    for model_name, model in trainer.models.items():
+        metrics = results[model_name]
+        trainer.save_model(model_name, model, metrics, feature_names)
     
-    # Save best model
-    trainer.save_model(best_model_name, best_model, best_metrics, feature_names)
+    # Optionally, select best model
+    best_model_name = trainer.select_best_model(results)
+    logger.info(f"Best model for deployment: {best_model_name}")
     
     logger.info("Training pipeline completed successfully!")
+
 
 
 if __name__ == "__main__":

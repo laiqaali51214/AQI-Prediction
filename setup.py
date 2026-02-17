@@ -2,10 +2,10 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="10pearls-aqi",
+    name="aqi-prediction-system",
     version="1.0.0",
     description="AQI Prediction System using Serverless Stack",
-    author="Sagar Chhabriya",
+    author="Laiqa Ali",
     packages=find_packages(),
     install_requires=[
         "pandas>=2.0.0",

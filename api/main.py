@@ -238,7 +238,40 @@ async def predict_aqi(request: PredictionRequest):
                 feature_vector[f] = 0
             
             feature_vector = feature_vector[feature_names]
+
+            #####################################################################################################
+            ############################# ERROR HANDLING ############################################################
+            # # Apply same preprocessing as training: impute NaNs, scale, and select features
+            # # 1. Impute missing values (fill NaNs with 0, since model expects no NaNs)
+            # # Note: In training, median imputation was used, but for single-row inference,
+            # # filling with 0 is acceptable as features will be scaled anyway
+            # feature_vector = feature_vector.fillna(0)
             
+            # # 2. Apply scaler if available (from training) - CRITICAL for Ridge model
+            # scaler = metadata.get('scaler')
+            # if scaler is not None:
+            #     feature_vector_scaled = scaler.transform(feature_vector)
+            #     feature_vector = pd.DataFrame(feature_vector_scaled, columns=feature_names, index=feature_vector.index)
+            # else:
+            #     logger.warning("No scaler found in model metadata. Predictions may be inaccurate.")
+            
+            # # 3. Apply feature selector if available (from training)
+            # feature_selector = metadata.get('feature_selector')
+            # if feature_selector is not None:
+            #     feature_vector_selected = feature_selector.transform(feature_vector)
+            #     # Get selected feature names
+            #     selected_feature_names = [feature_names[i] for i in range(len(feature_names)) if feature_selector.get_support()[i]]
+            #     feature_vector = pd.DataFrame(feature_vector_selected, columns=selected_feature_names)
+            # else:
+            #     logger.debug("No feature selector found in model metadata. Using all features.")
+            
+            # # Ensure no NaNs remain before prediction (Ridge cannot handle NaNs)
+            # if feature_vector.isna().any().any():
+            #     logger.warning("NaNs still present after preprocessing. Filling remaining NaNs with 0.")
+            #     feature_vector = feature_vector.fillna(0)
+            
+
+            ##########################################################################################################3
             # Make prediction
             try:
                 predicted_aqi = model.predict(feature_vector)[0]
