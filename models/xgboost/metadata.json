@@ -1,18 +1,19 @@
 {
   "model_name": "xgboost",
   "metrics": {
-    "rmse": 7.802169651830558,
-    "mae": 1.9618470037925695,
-    "r2": 0.914006971346279,
-    "mape": 3.631694890898833,
-    "train_r2": 0.9984278334101486,
-    "overfitting_gap": 0.08442086206386967
+    "rmse": 4.881836119117368,
+    "mae": 1.7910124267753011,
+    "r2": 0.9654294218924659,
+    "mape": 2.1328600451747453,
+    "train_r2": 0.9989071725567478,
+    "overfitting_gap": 0.033477750664281825
   },
   "feature_names": [
     "pm25",
     "pm10",
     "no2",
     "o3",
+    "so2",
     "temperature",
     "humidity",
     "wind_speed",
@@ -22,6 +23,7 @@
     "pm10_aqi",
     "o3_aqi",
     "no2_aqi",
+    "so2_aqi",
     "aqi_calculated",
     "hour",
     "day_of_week",
@@ -109,10 +111,8 @@
     "pm25_no2_interaction",
     "pm10_o3_interaction",
     "pm25_o3_interaction",
-    "backfill_date",
-    "so2_aqi",
-    "so2"
+    "backfill_date"
   ],
-  "trained_at": "2026-02-18T01:30:54.984697",
+  "trained_at": "2026-02-26T23:07:42.490197",
   "version": "1.0"
 }

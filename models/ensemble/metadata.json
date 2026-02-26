@@ -1,18 +1,19 @@
 {
   "model_name": "ensemble",
   "metrics": {
-    "rmse": 8.244470027006185,
-    "mae": 3.6925742547141596,
-    "r2": 0.9039808288063541,
-    "mape": 5.838019299602704,
-    "train_r2": 0.9777656329184882,
-    "overfitting_gap": 0.07378480411213406
+    "rmse": 5.84696287798716,
+    "mae": 3.2934443488996186,
+    "r2": 0.9504092218961747,
+    "mape": 4.249454671594818,
+    "train_r2": 0.9800672873459966,
+    "overfitting_gap": 0.029658065449821858
   },
   "feature_names": [
     "pm25",
     "pm10",
     "no2",
     "o3",
+    "so2",
     "temperature",
     "humidity",
     "wind_speed",
@@ -22,6 +23,7 @@
     "pm10_aqi",
     "o3_aqi",
     "no2_aqi",
+    "so2_aqi",
     "aqi_calculated",
     "hour",
     "day_of_week",
@@ -109,10 +111,8 @@
     "pm25_no2_interaction",
     "pm10_o3_interaction",
     "pm25_o3_interaction",
-    "backfill_date",
-    "so2_aqi",
-    "so2"
+    "backfill_date"
   ],
-  "trained_at": "2026-02-18T01:31:21.851935",
+  "trained_at": "2026-02-26T23:08:04.771114",
   "version": "1.0"
 }

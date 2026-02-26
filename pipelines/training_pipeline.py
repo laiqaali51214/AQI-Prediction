@@ -771,8 +771,14 @@ def main():
         logger.error("No features found. Please run feature pipeline first.")
         return
     
+    print(features.head())
+    print(features.dtypes)
+    print(features.shape)
+    
     # Prepare data
     X_train, X_test, y_train, y_test, feature_names = trainer.prepare_data(features)
+
+    
     
     # Train models
     results = trainer.train_all_models(X_train, X_test, y_train, y_test)

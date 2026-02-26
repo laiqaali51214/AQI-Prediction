@@ -1,18 +1,19 @@
 {
   "model_name": "ridge_regression",
   "metrics": {
-    "rmse": 8.230779398945264,
-    "mae": 2.0419703359534296,
-    "r2": 0.9042994596667585,
-    "mape": 3.6556683594151136,
-    "train_r2": 0.9613045152012732,
-    "overfitting_gap": 0.05700505553451474
+    "rmse": 4.943753234327399,
+    "mae": 1.2211071653733112,
+    "r2": 0.9645469323394277,
+    "mape": 1.4038788211470128,
+    "train_r2": 0.970835168887267,
+    "overfitting_gap": 0.0062882365478392765
   },
   "feature_names": [
     "pm25",
     "pm10",
     "no2",
     "o3",
+    "so2",
     "temperature",
     "humidity",
     "wind_speed",
@@ -22,6 +23,7 @@
     "pm10_aqi",
     "o3_aqi",
     "no2_aqi",
+    "so2_aqi",
     "aqi_calculated",
     "hour",
     "day_of_week",
@@ -109,10 +111,8 @@
     "pm25_no2_interaction",
     "pm10_o3_interaction",
     "pm25_o3_interaction",
-    "backfill_date",
-    "so2_aqi",
-    "so2"
+    "backfill_date"
   ],
-  "trained_at": "2026-02-18T01:30:54.465597",
+  "trained_at": "2026-02-26T23:07:41.347892",
   "version": "1.0"
 }

@@ -1,18 +1,19 @@
 {
   "model_name": "random_forest",
   "metrics": {
-    "rmse": 15.161745425216266,
-    "mae": 10.507673496208689,
-    "r2": 0.6752636786400315,
-    "mape": 14.51177237131458,
-    "train_r2": 0.8041448244163407,
-    "overfitting_gap": 0.12888114577630927
+    "rmse": 14.31684320998929,
+    "mae": 10.170245652509827,
+    "r2": 0.7026726998972993,
+    "mape": 13.19313229859127,
+    "train_r2": 0.8012047883919613,
+    "overfitting_gap": 0.098532088494662
   },
   "feature_names": [
     "pm25",
     "pm10",
     "no2",
     "o3",
+    "so2",
     "temperature",
     "humidity",
     "wind_speed",
@@ -22,6 +23,7 @@
     "pm10_aqi",
     "o3_aqi",
     "no2_aqi",
+    "so2_aqi",
     "aqi_calculated",
     "hour",
     "day_of_week",
@@ -109,10 +111,8 @@
     "pm25_no2_interaction",
     "pm10_o3_interaction",
     "pm25_o3_interaction",
-    "backfill_date",
-    "so2_aqi",
-    "so2"
+    "backfill_date"
   ],
-  "trained_at": "2026-02-18T01:30:54.331619",
+  "trained_at": "2026-02-26T23:07:41.022426",
   "version": "1.0"
 }
