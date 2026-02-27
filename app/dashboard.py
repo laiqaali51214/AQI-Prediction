@@ -46,7 +46,7 @@ try:
 except (AttributeError, FileNotFoundError, KeyError):
     API_URL = os.getenv("FASTAPI_URL", "http://localhost:8000")
 
-
+print("DEBUG API_URL:", API_URL)
 # API_URL = "http://127.0.0.1:8000"
 
 
