@@ -1,6 +1,8 @@
 name: Training Pipeline - Daily
 
 on:
+  schedule:
+    - cron: '0 2 * * *'  # Runs daily at 2 AM UTC
   push:
     branches:
       - main
@@ -9,61 +11,162 @@ on:
 jobs:
   train:
     runs-on: ubuntu-22.04
+    timeout-minutes: 60
 
     env:
+      PYTHONUNBUFFERED: 1
       MONGODB_URI: ${{ secrets.MONGODB_URI }}
 
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
+          cache: 'pip'
 
-      - name: Create Virtual Environment
+      - name: Upgrade pip and core tools
         run: |
-          python -m venv venv
-          source venv/bin/activate
-          python -m pip install --upgrade pip
+          python -m pip install --upgrade pip setuptools wheel
 
-      - name: Install Dependencies
+      - name: Install dependencies from requirements.txt
         run: |
-          source venv/bin/activate
-          pip install --no-cache-dir pandas numpy scikit-learn pymongo
-          pip install --no-cache-dir xgboost==1.7.6 lightgbm==4.3.2 || echo "Skipping heavy package install for CI"
+          pip install --no-cache-dir -r requirements.txt
+        continue-on-error: true
 
-      - name: Debug Environment
+      - name: Verify MongoDB Secret Configuration
         run: |
+          if [ -z "${{ secrets.MONGODB_URI }}" ]; then
+            echo "❌ ERROR: MONGODB_URI secret is not configured!"
+            echo "Please add MONGODB_URI to: Settings → Secrets and variables → Actions"
+            exit 1
+          fi
+          echo "✓ MONGODB_URI secret is configured"
+
+      - name: Debug Environment Information
+        run: |
+          echo "=== System Information ==="
           df -h
           free -h
-          source venv/bin/activate
-          python -m pip list
-          env
+          echo ""
+          echo "=== Python Information ==="
+          python --version
+          pip --version
+          echo ""
+          echo "=== Installed Packages ==="
+          pip list | grep -E "pandas|numpy|scikit|mongo|xgboost|lightgbm|pytest"
+          echo ""
+          echo "=== Environment Variables ==="
+          env | grep -v PASSWORD | grep -v TOKEN | grep -v SECRET || true
 
       - name: Test MongoDB Connection
         run: |
-          source venv/bin/activate
-          python - <<EOF
+          python - <<'EOF'
           import os
-          from pipelines.mongodb_store import MongoDBStore
+          import sys
+          
+          print("=== Testing MongoDB Connection ===")
           try:
+              from pipelines.mongodb_store import MongoDBStore
+              
+              if not os.getenv('MONGODB_URI'):
+                  print("❌ MONGODB_URI not set in environment")
+                  sys.exit(1)
+              
               store = MongoDBStore()
               df = store.get_features()
-              print("MongoDB connection successful, fetched rows:", len(df))
+              print(f"✓ MongoDB connection successful!")
+              print(f"✓ Features fetched: {len(df)} rows")
+              print(f"✓ Features shape: {df.shape}")
+              
+          except ImportError as e:
+              print(f"❌ Import Error: {e}")
+              print("Ensure pipelines/mongodb_store.py exists")
+              sys.exit(1)
           except Exception as e:
-              print("MongoDB connection failed:", e)
+              print(f"❌ MongoDB connection failed: {e}")
+              import traceback
+              traceback.print_exc()
+              sys.exit(1)
           EOF
+
+      - name: Check if Heavy ML Libraries are Available
+        id: check_ml_libs
+        run: |
+          python - <<'EOF'
+          try:
+              import xgboost
+              import lightgbm
+              print("xgboost_available=true" >> $GITHUB_OUTPUT)
+              print("lightgbm_available=true" >> $GITHUB_OUTPUT)
+              print("✓ XGBoost and LightGBM are available")
+          except ImportError:
+              print("xgboost_available=false" >> $GITHUB_OUTPUT)
+              print("lightgbm_available=false" >> $GITHUB_OUTPUT)
+              print("⚠ XGBoost/LightGBM not available, will run in lite mode")
+          EOF
+        continue-on-error: true
 
       - name: Run Training Pipeline
         run: |
-          source venv/bin/activate
-          python - <<EOF
-          from pipelines.training_pipeline import TrainingPipeline
+          python - <<'EOF'
+          import sys
           import os
-
-          # Optional: Skip heavy models for CI
-          pipeline = TrainingPipeline(train_lightgbm=False, train_xgboost=False)
-          pipeline.run()
+          
+          print("=== Starting Training Pipeline ===")
+          print(f"Working directory: {os.getcwd()}")
+          
+          try:
+              from pipelines.training_pipeline import TrainingPipeline
+              
+              # Check if heavy ML libraries are available
+              ml_libs_available = True
+              try:
+                  import xgboost
+                  import lightgbm
+              except ImportError:
+                  print("⚠ Warning: XGBoost/LightGBM not available, running in lite mode")
+                  ml_libs_available = False
+              
+              # Initialize pipeline with appropriate settings
+              if ml_libs_available:
+                  print("✓ Running training with all models (XGBoost + LightGBM)")
+                  pipeline = TrainingPipeline()
+                  pipeline.run()
+              else:
+                  print("✓ Running training without heavy ML models (scikit-learn only)")
+                  pipeline = TrainingPipeline(train_lightgbm=False, train_xgboost=False)
+                  pipeline.run()
+              
+              print("\n✓ Training pipeline completed successfully!")
+              
+          except ImportError as e:
+              print(f"❌ Import Error: Cannot find training_pipeline module")
+              print(f"Error: {e}")
+              import traceback
+              traceback.print_exc()
+              sys.exit(1)
+          except Exception as e:
+              print(f"❌ Training pipeline failed: {e}")
+              import traceback
+              traceback.print_exc()
+              sys.exit(1)
           EOF
+
+      - name: Upload failure logs
+        if: failure()
+        uses: actions/upload-artifact@v3
+        with:
+          name: training-pipeline-logs
+          path: |
+            *.log
+            .github/workflows/
+
+      - name: Success Notification
+        if: success()
+        run: |
+          echo "✅ Training Pipeline Completed Successfully!"
+          echo "Timestamp: $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
+          echo "Commit: ${{ github.sha }}"
