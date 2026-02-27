@@ -19,9 +19,7 @@
 9. [Machine Learning Models](#machine-learning-models)  
 10. [CI/CD Pipeline](#cicd-pipeline)  
 11. [API Documentation](#api-documentation)  
-12. [Configuration](#configuration)  
-13. [Troubleshooting](#troubleshooting)  
-14. [Project Status](#project-status)
+
 
 ---
 
