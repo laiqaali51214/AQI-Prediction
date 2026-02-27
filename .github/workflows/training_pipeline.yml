@@ -1,4 +1,4 @@
-name: AQI Training Pipeline
+name: Training Pipeline - Daily
 
 on:
   push:
