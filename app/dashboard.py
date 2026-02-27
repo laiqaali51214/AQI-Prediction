@@ -41,15 +41,14 @@ st.set_page_config(
 )
 
 # --- API base URL ---
-# try:
-#     API_URL = st.secrets.get("FASTAPI_URL", "http://localhost:8000")
-# except (AttributeError, FileNotFoundError, KeyError):
-#     API_URL = os.getenv("FASTAPI_URL", "http://localhost:8000")
+try:
+    API_URL = st.secrets.get("FASTAPI_URL", "http://localhost:8000")
+except (AttributeError, FileNotFoundError, KeyError):
+    API_URL = os.getenv("FASTAPI_URL", "http://localhost:8000")
 
-# import os
-# import streamlit as st
 
-API_URL = st.secrets.get("FASTAPI_URL") or os.getenv("FASTAPI_URL")
+# API_URL = "http://127.0.0.1:8000"
+
 
 
 # --- Custom CSS ---
